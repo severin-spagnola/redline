@@ -1,0 +1,19 @@
+name: redline-drift
+# Surfaces unratified + uncovered components (see ../../DESIGN.md). Advisory: this
+# does NOT block merges — it reports what needs a human decision. Add
+# `--fail-on-unratified` to the drift step if you want unratified components to
+# fail the check until confirmed.
+on:
+  pull_request:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python drift.py --policy arch.policy.json --rules redline.rules.json

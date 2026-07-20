@@ -56,6 +56,7 @@ class Component:
     edit_rule: str = ""
     display_name: str = ""
     connects_to: List[str] = field(default_factory=list)
+    ratified: bool = True   # False = auto-labeled by the rule engine, awaiting human confirm
 
 
 @dataclass
@@ -107,6 +108,7 @@ def _load_components(repo_root: Path, annotation_glob: str) -> List[Component]:
                 edit_rule=c.get("edit_rule", ""),
                 display_name=c.get("display_name", slug),
                 connects_to=list(c.get("connects_to", [])),
+                ratified=c.get("ratified", True),
             ))
     return comps
 
@@ -364,6 +366,7 @@ class Verdict:
     source: str = "component"   # "component" | "marker" | "guard-deletion" | "unannotated"
     anchor: str = ""            # e.g. "L40-47" for a marker region
     nudge: bool = False         # non-blocking "label this?" nudge
+    unratified: bool = False    # component is auto-labeled, awaiting human confirm (⚠)
 
 
 def _prescriptive(v: Verdict, policy: Policy) -> str:
@@ -486,6 +489,7 @@ def run_gate(changed: List[str], policy: Policy, ctx: PRContext,
         level = comp.editability if comp else UNANNOTATED
         slug = comp.slug if comp else "(unannotated)"
         reason = comp.edit_rule if comp else ""
+        unratified = bool(comp and not comp.ratified)
         if level == UNANNOTATED:
             rule = {"on_change": policy.unannotated_policy(), "override": []}
             src = "unannotated"
@@ -494,7 +498,8 @@ def run_gate(changed: List[str], policy: Policy, ctx: PRContext,
             src = "component"
         on_change = rule.get("on_change", "pass")
         if on_change == "pass":
-            verdicts.append(Verdict(p, slug, level, "pass", reason=reason, source=src))
+            verdicts.append(Verdict(p, slug, level, "pass", reason=reason, source=src,
+                                    unratified=unratified))
             continue
         sig_names = rule.get("override", [])
         mode = rule.get("override_mode", policy.config.get("override_mode", "any"))
@@ -502,7 +507,7 @@ def run_gate(changed: List[str], policy: Policy, ctx: PRContext,
         verdicts.append(Verdict(
             p, slug, level,
             "allowed_with_override" if ok else "violation",
-            sig_names, got, reason=reason, source=src))
+            sig_names, got, reason=reason, source=src, unratified=unratified))
     # intra-file marker verdicts + guard-deletion (needs git refs)
     if repo_root is not None:
         verdicts.extend(_marker_verdicts(changed, policy, ctx, base, head, repo_root))
@@ -541,7 +546,8 @@ def _fmt(verdicts: List[Verdict], policy: Policy) -> str:
             continue
         src = f" {{{v.source}}}" if v.source not in ("component", "unannotated") else ""
         anchor = f":{v.anchor}" if v.anchor else ""
-        base = f"[{icon[v.status]}] {v.level:<11} {v.path}{anchor}{src}  → {v.slug}"
+        warn = "  ⚠ unratified" if v.unratified else ""
+        base = f"[{icon[v.status]}] {v.level:<11} {v.path}{anchor}{src}  → {v.slug}{warn}"
         if v.status == "allowed_with_override":
             base += f"   (override: {','.join(v.got)})"
         lines.append(base)

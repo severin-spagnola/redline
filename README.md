@@ -86,6 +86,29 @@ You mark the **exceptions**; everything defaults 🟢 green. A brand-new file is
 green (never blocks work) but gets a non-blocking *"label this?"* nudge if it
 sits near a red component.
 
+## Onboarding + auto-labeling (keeping the graph honest as the code grows)
+
+Two questions this raises: *how do you create the graph in the first place*, and
+*what happens when new code is added later?* Both keep the LLM out of the trust
+path.
+
+**Creating the graph** — feed [`ONBOARDING.md`](ONBOARDING.md) to your own coding
+agent. It's a guided prompt that walks you through: state your project's thesis →
+discover candidate components → draft each one's editability + `edit_rule` +
+`sacred_invariants` *from your thesis* → **you ratify**. The agent proposes; your
+confirmation is what's written.
+
+**New code later** — you don't hand-label every new component, and an LLM doesn't
+auto-decide (that would put it back in the trust path). Instead, onboarding also
+produces a **rule library** ([`redline.rules.json`](DESIGN.md)) — human-ratified
+rules (`path_glob` / `name_regex` / type → level). New components are then
+auto-labeled by **deterministically applying those rules** (precedence: explicit
+rule → parent inheritance → sibling-majority → default 🟢). Anything auto-labeled
+is **enforced immediately** at its level but tagged **⚠ unratified**, and
+[`drift.py`](drift.py) lists every unratified/uncovered component until a human
+confirms it. The ruleset *is* the human decision, made once, up front —
+classification at runtime is pure deterministic parsing, no model.
+
 ## Components
 
 | File | What it is |
@@ -95,6 +118,9 @@ sits near a red component.
 | [`PRIOR_ART.md`](PRIOR_ART.md) | Cited proof of what does/doesn't exist. |
 | [`arch_gate.py`](arch_gate.py) | **The deterministic gate.** Diff → components → levels → pass/block. Marker-aware (intra-file), guard-deletion-aware, emits prescriptive PR comments. Stdlib only. |
 | [`build_labeler.py`](build_labeler.py) → `labeler.html` | **The human labeling tool.** Click your architecture graph to mark 🟡🔴; exports the policy. The LLM is never in the trust path — a human labels. |
+| [`ONBOARDING.md`](ONBOARDING.md) | **The guided setup prompt.** Feed to your agent; it drafts the graph + rule library from your thesis, you ratify. |
+| [`rule_engine.py`](rule_engine.py) | **Deterministic auto-labeler.** Applies the human-ratified `redline.rules.json` to classify new components (explicit rule → parent → sibling-majority → default). No model at classification time. |
+| [`drift.py`](drift.py) | **The drift report.** Lists ⚠ unratified + uncovered components so nothing silently goes stale. |
 | [`hooks/pretooluse_arch_guard.py`](hooks/pretooluse_arch_guard.py) | Claude Code `PreToolUse` hook — blocks a protected edit *before* it happens (fail-open on error). |
 | [`hooks/pre-push`](hooks/pre-push), [`hooks/install-hooks.sh`](hooks/install-hooks.sh) | Local git hooks for pre-push feedback. |
 | [`examples/arch_gate.yml`](examples/arch_gate.yml), [`post_comment.sh`](examples/post_comment.sh) | The GitHub Action: run the gate, post a sticky prescriptive PR comment, fail the required check on violation. |

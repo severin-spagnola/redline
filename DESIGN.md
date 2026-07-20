@@ -205,10 +205,72 @@ are **fully configurable**, not hardcoded:
 
 ---
 
+## Auto-labeling new components (the rule library)
+
+The graph must not silently go stale as a codebase grows, but an LLM must not
+decide what is thesis-critical (that would put it back in the trust path). The
+resolution: **a human ratifies the classification RULES once, up front; new
+components are then auto-labeled by applying those rules deterministically.** The
+LLM helps *author* the rules during onboarding (human confirms them); it never
+decides a label at classification time.
+
+The ruleset is the ratification, done ahead of time. This is the same shape as
+the gate: LLM proposes (the rule library), human ratifies (reviews it in
+onboarding), deterministic code applies it (the rule engine).
+
+### Rule library (`redline.rules.json`, human-ratified)
+
+Authored during onboarding (see `ONBOARDING.md`) by elaborating the user's
+natural-language thesis into explicit, machine-checkable rules:
+
+```json
+{
+  "rules": [
+    { "match": {"path_glob": "strat/signal/**"}, "level": "never",
+      "reason": "signal logic is causal-by-contract — no look-ahead" },
+    { "match": {"name_regex": ".*(_ma|indicator|feature).*"}, "level": "conditional",
+      "reason": "feature/indicator code affects every downstream metric" },
+    { "match": {"path_glob": "ui/**"}, "level": "editable" }
+  ],
+  "inherit": { "subcomponent": true, "sibling_majority": true },
+  "default": "editable"
+}
+```
+
+Each rule is a `match` (path glob, name regex, or component-type) → a `level` +
+`reason`. Rules are **data**, applied by deterministic parsing — no model at
+classification time.
+
+### Precedence for a new component (first match wins)
+
+1. **Explicit rule** — a `redline.rules.json` rule matches → use its level+reason.
+2. **Parent inheritance** — a subcomponent inherits its parent component's level.
+3. **Sibling-majority** — a new sibling in a group inherits the majority level of
+   its same-rank peers.
+4. **Default + flag** — none of the above → `default` (green), tagged
+   **⚠ auto-labeled, unratified**.
+
+### The ⚠ unratified state
+
+Anything auto-labeled carries `"ratified": false` and an `"auto_reason"`. It is
+**enforced at its level immediately** (an auto-`never` blocks like a real
+`never`, so a genuinely critical new component is protected the moment it lands)
+**but stays surfaced** — the labeler shows a ⚠, and `redline drift` lists every
+unratified component until a human confirms it (flips `ratified` to true) or
+changes the level. Nothing stays auto-forever silently; nothing critical is left
+unprotected while it waits.
+
+This keeps the two halves cleanly split, as everywhere else in the design:
+- **Automatable** (finding what's undecided + applying ratified rules) → the
+  rule engine + `redline drift`.
+- **Not automatable** (deciding the rules, ratifying the exceptions) → the human,
+  once, in onboarding, then only for the ⚠ tail.
+
 ## Non-negotiables (so future changes don't erode the idea)
 
 - The **LLM is never in the trust path** — not for classification authority, not
-  for enforcement. Human ratifies; deterministic gate enforces.
+  for enforcement. Human ratifies; deterministic gate enforces. Auto-labeling is
+  the deterministic application of **human-ratified rules**, never an LLM decision.
 - The **gate is the guarantee**; advisory/hook layers are ergonomics and must not
   be depended on for enforcement.
 - **Deleting a guard = violating it.**

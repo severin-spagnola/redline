@@ -1,0 +1,13 @@
+{
+  "rules": [
+    { "match": {"path_glob": "strat/signal/**"}, "level": "never",
+      "reason": "signal logic is causal-by-contract — no look-ahead" },
+    { "match": {"name_regex": ".*(_ma|indicator|feature).*"}, "level": "conditional",
+      "reason": "feature/indicator code affects every downstream backtest metric" },
+    { "match": {"path_glob": "strat/**"}, "level": "conditional",
+      "reason": "strategy code is tunable but backtest-sensitive" },
+    { "match": {"path_glob": "notebooks/**"}, "level": "editable" }
+  ],
+  "inherit": { "subcomponent": true, "sibling_majority": true },
+  "default": "editable"
+}
