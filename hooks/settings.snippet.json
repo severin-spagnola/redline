@@ -1,0 +1,47 @@
+{
+  "//": [
+    "Editability-Policy PreToolUse guard — .claude/settings.json fragment.",
+    "",
+    "WHAT IT DOES: before Claude Code runs a Write / Edit / NotebookEdit, this",
+    "hook resolves the target file to its editability level (via arch_gate.py)",
+    "and, if the file belongs to a protected component (conditional/never/frozen)",
+    "or contains a never/frozen arch:begin marker region, blocks the edit with a",
+    "prescriptive message (exit 2). It FAILS OPEN on any internal error, so a",
+    "broken hook can never stop you from editing. This is ergonomics only — the",
+    "CI gate (arch_gate.py on the PR) is the real, un-bypassable enforcement.",
+    "",
+    "INSTALL:",
+    "  1. Merge the \"hooks\" block below into your repo's .claude/settings.json",
+    "     (create the file if absent). If you already have hooks.PreToolUse,",
+    "     append this one matcher-object to that existing array.",
+    "  2. Use an ABSOLUTE path to the hook script, or a \"$CLAUDE_PROJECT_DIR\"-",
+    "     relative one as shown (Claude Code expands $CLAUDE_PROJECT_DIR to the",
+    "     project root). The 'python3' launcher keeps it stdlib-only / no venv.",
+    "  3. arch.policy.json is found by walking up from the edited file (or set",
+    "     the ARCH_POLICY env var to an absolute path).",
+    "",
+    "OPTIONS (env, all optional):",
+    "  ARCH_GUARD_MODE=block  (default) exit 2 and block on a protected target.",
+    "  ARCH_GUARD_MODE=warn   print the message but allow the edit (advisory).",
+    "  ARCH_POLICY=/abs/arch.policy.json   pin the policy file explicitly.",
+    "  ARCH_GUARD_DEBUG=1     extra diagnostics on stderr.",
+    "",
+    "To also protect the hook itself from the agent (SPEC §7.3), mark this",
+    "script's path 'frozen' in a redline.meta.json — but remember a hook is",
+    "per-agent; the CI gate remains the guarantee."
+  ],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/tools/arch/spec/hooks/pretooluse_arch_guard.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

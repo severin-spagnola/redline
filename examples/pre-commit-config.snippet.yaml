@@ -1,0 +1,48 @@
+# Editability-gate entry for the pre-commit framework (https://pre-commit.com).
+#
+# Paste this `repo: local` block into your repository's .pre-commit-config.yaml
+# (merge under an existing top-level `repos:` list if you already have one), then:
+#     pip install pre-commit
+#     pre-commit install --hook-type pre-commit --hook-type pre-push
+#
+# ── LIMITATIONS (read before trusting this locally) ──────────────────────────
+# * ADVISORY ONLY. Like every local hook it is bypassable (`git commit -n` /
+#   `--no-verify`) and per-clone. The REQUIRED CI status check (arch_gate.yml)
+#   is the un-bypassable guarantee — never rely on this for enforcement.
+# * STAGED-vs-HEAD, not PR-vs-base. At commit time the gate compares the staged
+#   worktree against HEAD, so it sees only THIS commit's changes, not the whole
+#   branch. A protected edit made in an earlier commit on the branch won't be
+#   re-flagged here — CI (base..head over the full PR) still catches it.
+#   Because HEAD is the base, marker/guard-deletion diffing works, but override
+#   signals that live on the PR (pr_body_block, codeowners_review, label) do NOT
+#   exist yet locally, so a locally-blocked edit may legitimately pass in CI once
+#   the PR carries its justification/approval. Treat a local block as a heads-up.
+# * The `stages: [pre-push]` variant below compares the push range instead and is
+#   closer to CI; prefer it, or the standalone hooks/pre-push, for fewer false
+#   positives. The commit-stage variant is the tightest, earliest feedback.
+
+- repo: local
+  hooks:
+    # (A) Commit-stage: fastest feedback, narrowest scope (staged vs HEAD).
+    - id: arch-gate
+      name: Editability gate (staged vs HEAD)
+      entry: python tools/arch/spec/arch_gate.py --repo-root . --policy arch.policy.json --base HEAD --head :0
+      language: system
+      pass_filenames: false      # the gate reads the diff itself, not a file list
+      always_run: true           # run even when pre-commit thinks nothing matches
+      # `:0` is the git rev for the index (staged tree); `--base HEAD` diffs it
+      # against the last commit. Exit 1 (a violation) blocks the commit.
+
+    # (B) Push-stage (recommended): compares the range being pushed, like CI.
+    #     Enable with:  pre-commit install --hook-type pre-push
+    - id: arch-gate-push
+      name: Editability gate (push range)
+      entry: python tools/arch/spec/arch_gate.py --repo-root . --policy arch.policy.json --base '@{upstream}' --head HEAD
+      language: system
+      stages: [pre-push]
+      pass_filenames: false
+      always_run: true
+      # '@{upstream}' is the tracked remote branch. If a branch has no upstream
+      # yet (never pushed), this ref won't resolve and the hook errors — use the
+      # standalone hooks/pre-push (it handles the new-branch all-zeros case) if
+      # you push new branches often.

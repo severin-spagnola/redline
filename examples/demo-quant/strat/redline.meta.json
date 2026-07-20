@@ -1,0 +1,9 @@
+{
+  "component": "golden-cross-strategy",
+  "display_name": "Golden/Death Cross Strategy",
+  "editability": "conditional",
+  "edit_rule": "Tunable (windows, sizing), but the signal must stay causal — see the never-marked signal clause.",
+  "description": "A moving-average crossover strategy and its backtest.",
+  "paths": ["strat/**"],
+  "sacred_invariants": ["Signals use only information available at or before bar close (no look-ahead)."]
+}

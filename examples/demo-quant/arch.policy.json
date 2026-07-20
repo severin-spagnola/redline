@@ -1,0 +1,17 @@
+{
+  "spec_version": "0.1",
+  "annotation_glob": "**/redline.meta.json",
+  "protected_branches": ["main"],
+  "unannotated_policy": "pass",
+  "override_mode": "any",
+  "levels": {
+    "editable":    { "on_change": "pass" },
+    "conditional": { "on_change": "require", "override": ["justification"] },
+    "never":       { "on_change": "block",   "override": ["justification", "code_owner"] },
+    "frozen":      { "on_change": "block",   "override": ["justification", "code_owner"], "override_mode": "all" }
+  },
+  "overrides": {
+    "justification": { "type": "pr_body_block", "heading": "Arch-Override" },
+    "code_owner":    { "type": "codeowners_review" }
+  }
+}

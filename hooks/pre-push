@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# pre-push — local editability-gate hook (advisory, per DESIGN.md).
+#
+# Runs arch_gate.py over the range being pushed and prints its PRESCRIPTIVE
+# output BEFORE the push reaches the remote, so an agent/human sees "you edited
+# X (never) — to pass, do Y" in-session instead of waiting for the CI round-trip.
+#
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ THIS HOOK IS ADVISORY, NOT THE GUARANTEE.                                 │
+# │  * It is bypassable:  git push --no-verify   (skips all pre-push hooks).  │
+# │  * It is local & per-clone: a fresh clone / another machine won't have it.│
+# │  The REQUIRED CI status check (arch_gate.yml) is the un-bypassable gate.  │
+# │  This hook just saves a round-trip; never rely on it for enforcement.     │
+# └──────────────────────────────────────────────────────────────────────────┘
+#
+# FAIL-OPEN: if arch_gate.py or the policy file is missing, we print a warning
+# and ALLOW the push (exit 0). A partial/absent setup must never brick pushing;
+# the CI gate still enforces on the PR.
+#
+# git passes, on stdin, one line per ref being pushed:
+#     <local ref> <local sha> <remote ref> <remote sha>
+# and $1=<remote name> $2=<remote url>. We gate remote_sha..local_sha. For a NEW
+# branch (remote_sha all-zeros) there is no upstream point, so we diff against
+# the repo's default branch instead.
+set -euo pipefail
+
+ZERO='0000000000000000000000000000000000000000'
+
+# --- locate repo root, gate, policy -----------------------------------------
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "${repo_root}" ]; then
+  echo "[arch-gate:pre-push] WARNING: not inside a git repo; skipping." >&2
+  exit 0
+fi
+
+# Gate location is overridable; default to the in-repo copy shipped with the spec.
+GATE="${ARCH_GATE:-${repo_root}/tools/arch/spec/arch_gate.py}"
+POLICY="${ARCH_POLICY:-${repo_root}/arch.policy.json}"
+
+python_bin="$(command -v python3 || command -v python || true)"
+
+# FAIL OPEN on any missing prerequisite.
+if [ -z "${python_bin}" ]; then
+  echo "[arch-gate:pre-push] WARNING: python not found; skipping gate (push allowed)." >&2
+  exit 0
+fi
+if [ ! -f "${GATE}" ]; then
+  echo "[arch-gate:pre-push] WARNING: gate not found at ${GATE}; skipping (push allowed)." >&2
+  echo "[arch-gate:pre-push]          set ARCH_GATE=/path/to/arch_gate.py to point at it." >&2
+  exit 0
+fi
+if [ ! -f "${POLICY}" ]; then
+  echo "[arch-gate:pre-push] WARNING: policy not found at ${POLICY}; skipping (push allowed)." >&2
+  echo "[arch-gate:pre-push]          set ARCH_POLICY=/path/to/arch.policy.json to point at it." >&2
+  exit 0
+fi
+
+# --- default branch (for the new-branch case) -------------------------------
+default_branch() {
+  # Prefer the remote HEAD's target; fall back to main/master; else current branch.
+  local remote="${1:-origin}" ref b
+  ref="$(git symbolic-ref --quiet "refs/remotes/${remote}/HEAD" 2>/dev/null || true)"
+  if [ -n "${ref}" ]; then
+    echo "${ref#refs/remotes/${remote}/}"; return
+  fi
+  for b in main master; do
+    if git show-ref --verify --quiet "refs/remotes/${remote}/${b}"; then echo "${b}"; return; fi
+  done
+  git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main"
+}
+
+remote_name="${1:-origin}"
+rc=0
+
+# --- process each pushed ref from stdin -------------------------------------
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Skip branch deletions (nothing to inspect on the local side).
+  if [ "${local_sha}" = "${ZERO}" ]; then
+    continue
+  fi
+
+  if [ "${remote_sha}" = "${ZERO}" ]; then
+    # New branch on the remote: no prior upstream commit to diff from. Compare
+    # against the default branch so we still catch protected edits, but only
+    # over commits not already on it (avoid flagging the whole branch's history).
+    db="$(default_branch "${remote_name}")"
+    base="$(git rev-parse --verify --quiet "refs/remotes/${remote_name}/${db}" 2>/dev/null || echo "${db}")"
+    # Merge-base keeps us to this branch's own new commits.
+    mb="$(git merge-base "${base}" "${local_sha}" 2>/dev/null || echo "${base}")"
+    base_ref="${mb}"
+    echo "[arch-gate:pre-push] new branch → gating ${db}..${local_ref:-HEAD} (base ${base_ref})"
+  else
+    base_ref="${remote_sha}"
+    echo "[arch-gate:pre-push] gating ${remote_ref:-HEAD} : ${base_ref:0:12}..${local_sha:0:12}"
+  fi
+
+  # Nothing to compare (e.g. base == head) → skip quietly.
+  if [ "${base_ref}" = "${local_sha}" ]; then
+    continue
+  fi
+
+  # Run the gate over this range. It exits 1 on a violation, 0 on pass, 2 on a
+  # config error; we honor its exit code (but stay fail-open on missing setup,
+  # handled above). Overrides are NOT consulted locally except env_ack, since
+  # PR body / reviews / labels don't exist yet — this is a heads-up, and the CI
+  # gate re-checks with the real override signals.
+  if ! "${python_bin}" "${GATE}" \
+        --repo-root "${repo_root}" \
+        --policy "${POLICY}" \
+        --base "${base_ref}" \
+        --head "${local_sha}"; then
+    rc=1
+  fi
+done
+
+if [ "${rc}" -ne 0 ]; then
+  echo "" >&2
+  echo "[arch-gate:pre-push] BLOCKED: this push edits protected component(s) without a" >&2
+  echo "[arch-gate:pre-push] required override. Fix per the ↳ lines above, or state the" >&2
+  echo "[arch-gate:pre-push] reason in the PR body / get a code-owner review so the CI gate" >&2
+  echo "[arch-gate:pre-push] passes. To push anyway (advisory hook): git push --no-verify" >&2
+fi
+
+exit "${rc}"

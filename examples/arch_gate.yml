@@ -1,0 +1,139 @@
+name: Editability Gate
+
+# ---------------------------------------------------------------------------
+# Deterministic enforcement of the editability policy (see ../SPEC.md, ../DESIGN.md).
+#
+# WHAT THIS IS: the load-bearing merge gate + the agent-facing feedback loop.
+#   * The FAILING STATUS CHECK is the guarantee. A change to a
+#     `never`/`frozen`/`conditional` component without the required override
+#     signal makes `arch_gate.py` exit non-zero, which fails this job.
+#   * The STICKY PR COMMENT is the ergonomics. It carries the gate's
+#     PRESCRIPTIVE output ("you edited X (never) — to pass, do Y") to exactly
+#     where an agent is already looking, so on its next loop it reads the fix
+#     instead of thrashing (DESIGN.md, "anti-thrash feedback loop").
+#
+# >>> REQUIRED SETUP (do this once, or the gate is toothless) <<<
+#   1. Make "Editability Gate" a REQUIRED status check in branch protection
+#      (Settings → Branches → protect `main`/`release/*` → Require status checks
+#       to pass → select this job). The comment is advisory; only a REQUIRED,
+#      failing check actually blocks the merge. The agent controls neither this
+#      runner nor the ruleset, so it cannot route around a required check.
+#   2. Keep `permissions.pull-requests: write` (needed to post/update the comment).
+#
+# NOTE: comment posting runs with `if: always()` and the job fails at the END,
+# so a violating PR still gets its prescriptive comment before the red check.
+# ---------------------------------------------------------------------------
+
+on:
+  pull_request:
+    # The protected branches this gate guards. Keep in sync with
+    # arch.policy.json:protected_branches and with branch protection rules.
+    branches: [main, "release/*"]
+
+# Read the diff/reviews/labels; WRITE the sticky PR comment.
+permissions:
+  contents: read
+  pull-requests: write
+
+# One in-flight run per PR; a new push cancels the previous (comment stays sticky).
+concurrency:
+  group: arch-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  editability-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for base..head diff)
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth 0 so `origin/<base>` and the PR head sha are both present
+          # for `git diff base...head` and for marker/guard-deletion scanning.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Collect approving code owners
+        id: approvals
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Logins of reviewers whose LATEST review state is APPROVED. Feeds the
+          # `codeowners_review` override signal. A fuller impl would intersect
+          # these with CODEOWNERS for the touched paths; the gate treats any
+          # listed approver as satisfying that signal.
+          approvers=$(gh pr view "${{ github.event.pull_request.number }}" \
+            --json reviews \
+            --jq '[.reviews[] | select(.state=="APPROVED") | .author.login] | unique | join(",")' \
+            2>/dev/null || echo "")
+          echo "owners=${approvers}" >> "$GITHUB_OUTPUT"
+
+      - name: Collect labels
+        id: labels
+        run: |
+          # PR label names, comma-joined, read from the event payload (no API call).
+          labels=$(jq -r '[.pull_request.labels[].name] | join(",")' "$GITHUB_EVENT_PATH" 2>/dev/null || echo "")
+          echo "labels=${labels}" >> "$GITHUB_OUTPUT"
+
+      - name: Write PR body to file
+        run: |
+          # The PR description text (source of the `pr_body_block` override).
+          jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" > pr_body.txt
+
+      - name: Run editability gate
+        id: gate
+        run: |
+          # Run the gate. It ALWAYS writes comment.md (pass or fail) via
+          # --comment-out, then exits non-zero on a violation. We capture that
+          # exit code and re-raise it at the end of the job (after the comment is
+          # posted) so the failing status check blocks the merge.
+          set +e
+          python tools/arch/spec/arch_gate.py \
+            --repo-root . \
+            --policy arch.policy.json \
+            --base "origin/${{ github.base_ref }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --pr-body-file pr_body.txt \
+            --approved-owners "${{ steps.approvals.outputs.owners }}" \
+            --labels "${{ steps.labels.outputs.labels }}" \
+            --comment-out comment.md
+          code=$?
+          set -e
+          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+          # Fallback body if the gate died before writing one (config/usage error).
+          if [ ! -s comment.md ]; then
+            {
+              echo "<!-- arch-gate -->"
+              echo "## Editability Gate"
+              echo ""
+              echo "The gate could not run to completion (exit ${code}). Check the"
+              echo "**Run editability gate** step logs — likely a policy/config error."
+            } > comment.md
+          fi
+
+      - name: Post or update sticky PR comment
+        # Post feedback whether the gate passed OR failed — the agent needs the
+        # prescriptive fix precisely when it failed. `always()` so a failing gate
+        # step does not skip this.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          bash tools/arch/spec/examples/post_comment.sh comment.md
+
+      - name: Enforce gate verdict (fail the required check on violation)
+        # THE GUARANTEE. Runs after the comment is posted; re-raises the gate's
+        # exit code so a violation turns this required check red and blocks merge.
+        if: always()
+        run: |
+          code="${{ steps.gate.outputs.exit_code }}"
+          if [ "${code}" != "0" ]; then
+            echo "::error::Editability gate blocked this PR (exit ${code}). See the sticky PR comment for the required fix."
+            exit "${code}"
+          fi
+          echo "Editability gate passed."
