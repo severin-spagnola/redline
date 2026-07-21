@@ -109,6 +109,35 @@ is **enforced immediately** at its level but tagged **⚠ unratified**, and
 confirms it. The ruleset *is* the human decision, made once, up front —
 classification at runtime is pure deterministic parsing, no model.
 
+## Beyond the write boundary: the anti-overfit stack
+
+The path gate stops an agent editing *frozen* code directly. But it's a
+**syntactic** guard, and the deepest failure in an autonomous loop is
+**semantic**: an agent (or a human) writes a *process* — a heuristic, a
+recognizer, a routing rule — that secretly fits specific cases instead of
+following the theory. "Let's just add a special-case so it handles X" is
+instance-fitting wearing a process costume, and no file boundary sees it.
+
+Redline ships four layers for this, cheap → expensive, **none putting an LLM in
+the trust path** (see [`ANTI_OVERFIT.md`](ANTI_OVERFIT.md)):
+
+1. **Path redline** (`arch_gate.py`) — blocks direct edits to templates/instances. *Hard.*
+2. **Static lint** (`overfit_lint.py`) — deterministic AST scan flagging hardcoded
+   names / magic constants in *process* files (`if name.startswith("axi_")`,
+   `== 37`). ~free, advisory.
+3. **Fresh-context judge** (`overfit_judge.py`) — a no-context LLM review of a diff
+   against the project theory, **blind to why the edit was made**, flagging
+   disguised overfit. Advisory (an LLM is never a gate); trust its *flags*, not
+   its *passes*.
+4. **Sealed ratchet** ([`SEALED_RATCHET.md`](SEALED_RATCHET.md)) — the only thing
+   that measures *generalization*: a held-out set the loop **cannot see**, gating
+   promotion (target↑ **and** no previously-passing family↓). Honest precisely
+   because the loop can't optimize against it.
+
+The one sentence: *the redline stops direct instance-fitting; the sealed held-out
+set is what actually measures whether a process generalizes — and it stays honest
+only while the loop and the human can't see or optimize against it.*
+
 ## Components
 
 | File | What it is |
@@ -121,6 +150,9 @@ classification at runtime is pure deterministic parsing, no model.
 | [`ONBOARDING.md`](ONBOARDING.md) | **The guided setup prompt.** Feed to your agent; it drafts the graph + rule library from your thesis, you ratify. |
 | [`rule_engine.py`](rule_engine.py) | **Deterministic auto-labeler.** Applies the human-ratified `redline.rules.json` to classify new components (explicit rule → parent → sibling-majority → default). No model at classification time. |
 | [`drift.py`](drift.py) | **The drift report.** Lists ⚠ unratified + uncovered components so nothing silently goes stale. |
+| [`overfit_lint.py`](overfit_lint.py) | **Static instance-fitting lint.** Deterministic AST scan of process code for hardcoded names / magic constants. Advisory. |
+| [`overfit_judge.py`](overfit_judge.py) | **Fresh-context overfit judge.** Prepares/runs a no-context LLM review of a diff vs. the theory, blind to motivation. Advisory. |
+| [`ANTI_OVERFIT.md`](ANTI_OVERFIT.md), [`SEALED_RATCHET.md`](SEALED_RATCHET.md) | The anti-overfit stack + the sealed-held-out-set discipline for autonomous loops. |
 | [`hooks/pretooluse_arch_guard.py`](hooks/pretooluse_arch_guard.py) | Claude Code `PreToolUse` hook — blocks a protected edit *before* it happens (fail-open on error). |
 | [`hooks/pre-push`](hooks/pre-push), [`hooks/install-hooks.sh`](hooks/install-hooks.sh) | Local git hooks for pre-push feedback. |
 | [`examples/arch_gate.yml`](examples/arch_gate.yml), [`post_comment.sh`](examples/post_comment.sh) | The GitHub Action: run the gate, post a sticky prescriptive PR comment, fail the required check on violation. |
