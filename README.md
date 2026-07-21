@@ -7,6 +7,10 @@
 
 *Mark the code an agent must not touch **redline**; the merge gate enforces it.*
 
+> **New here (human or LLM)?** Run `python redline.py docs` for the read-in-order
+> doc index, or read [`HARNESS.md`](HARNESS.md) for how redline plugs into a
+> project and an autonomous coding loop.
+
 ---
 
 ## The problem
@@ -142,6 +146,9 @@ only while the loop and the human can't see or optimize against it.*
 
 | File | What it is |
 |---|---|
+| [`redline.py`](redline.py) | **The unified CLI.** `redline check / gate / lint / judge / drift / sealed / label / docs`. Run `redline docs` for the read-in-order doc index. |
+| [`HARNESS.md`](HARNESS.md) | **How redline plugs into a project + coding loop** — the feedback-surfacing rule and the firewall (what the loop must never see). |
+| [`sealed_gate.py`](sealed_gate.py) | **The sealed-ratchet gate.** Runs your held-out eval loop-blind, promotes only if target↑ AND no passing family↓, returns only PROMOTE/REJECT. |
 | [`SPEC.md`](SPEC.md) | The format + gate semantics (the source of truth). |
 | [`DESIGN.md`](DESIGN.md) | Every design decision + rationale. |
 | [`PRIOR_ART.md`](PRIOR_ART.md) | Cited proof of what does/doesn't exist. |
