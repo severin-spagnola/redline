@@ -172,9 +172,9 @@ def _comp(slug, level="never", paths=None, dir_scope="", connects_to=None):
 def test_resolve_component_most_specific_glob_wins():
     # Two components both match; longest matching glob (more specific) wins.
     broad = _comp("broad", paths=["engine/**"])
-    narrow = _comp("narrow", paths=["engine/sable/spec_ingest/*.py"])
+    narrow = _comp("narrow", paths=["src/pipeline/*.py"])
     comps = [broad, narrow]
-    got = ag.resolve_component("engine/sable/spec_ingest/semantic_templates.py", comps)
+    got = ag.resolve_component("src/pipeline/semantic_templates.py", comps)
     assert got is not None and got.slug == "narrow"
 
 
@@ -182,9 +182,9 @@ def test_resolve_component_nearest_ancestor_dir_fallback():
     # No paths glob matches -> deepest annotation-file directory that is an
     # ancestor wins (nearest-file-wins, like .gitignore nesting).
     shallow = _comp("shallow", paths=[], dir_scope="engine")
-    deep = _comp("deep", paths=[], dir_scope="engine/sable/cegis")
+    deep = _comp("deep", paths=[], dir_scope="src/synth")
     comps = [shallow, deep]
-    got = ag.resolve_component("engine/sable/cegis/enumerate.py", comps)
+    got = ag.resolve_component("src/synth/enumerate.py", comps)
     assert got is not None and got.slug == "deep"
     # A file under only the shallow scope falls back to shallow.
     got2 = ag.resolve_component("engine/other/thing.py", comps)

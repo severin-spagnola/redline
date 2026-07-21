@@ -305,5 +305,6 @@ are written and ratified, tell the user the next steps:
   thesis-critical exceptions.
 - **Deleting a guard is violating it.** Never suggest removing markers to make a
   check pass.
-- **Scope is theory-critical projects.** Don't oversell Redline as universal;
-  on a CRUD app the easy edit is usually fine.
+- **Label sparingly.** Only propose `conditional`/`never`/`frozen` where the
+  user's stated thesis genuinely implies it. Most code is fine to edit freely;
+  over-labeling makes the guardrail noisy and the team ignores it.

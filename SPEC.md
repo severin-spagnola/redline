@@ -94,7 +94,7 @@ The key words MUST, MUST NOT, SHOULD, MAY are used per RFC 2119.
   "editability": "never",
   "edit_rule": "One sentence: exactly when and how this may change.",
   "description": "One sentence: what this component is.",
-  "paths": ["engine/sable/spec_ingest/semantic_templates.py"],
+  "paths": ["src/verify/proof_templates/**"],
   "sacred_invariants": ["behaviors that must never change"],
   "connects_to": ["other-component-slugs"]
 }

@@ -24,7 +24,7 @@ happens to peek at the future. Catching it doesn't take intelligence, just
 **memory of the project's theory** — the thing you keep re-typing as *"NO, do not
 edit X, the entire point of the project is…"*.
 
-Keystone makes that correction **permanent and machine-enforced.**
+Redline makes that correction **permanent and machine-enforced.**
 
 ## Why nobody built this (and the honest scope)
 
@@ -162,11 +162,25 @@ pre-edit hook):
 The agent doesn't need to *remember* the rule; the environment re-presents it,
 prescriptively, every time it acts.
 
-## Non-negotiables (so future changes don't erode the idea)
+## Design principles
 
-- The **LLM is never in the trust path** — not for classifying what's sacred, not
-  for enforcement. A human ratifies; the deterministic gate enforces.
-- The **gate is the guarantee**; advisory/hook layers must never be depended on.
-- **Deleting a guard = violating it.**
-- **Green by omission**; annotate exceptions only.
-- Scope is **theory-critical projects**; don't oversell as universal.
+- **The LLM is never in the trust path.** A human ratifies what's protected and
+  the rules for classifying new code; a deterministic gate enforces. No model
+  decides what it's allowed to edit.
+- **The gate is the guarantee.** The advisory and pre-edit-hook layers are
+  ergonomics; enforcement lives in the CI check the agent can't bypass.
+- **Deleting a guard is a violation.** Removing a marker counts as editing the
+  code it protected.
+- **Green by omission.** You annotate the exceptions; everything else is editable.
+
+## Where it fits
+
+Redline is most valuable on **theory-critical codebases** — quant, formal
+methods, compilers, consensus, cryptography, numerics — where a locally-easy edit
+can silently break a global invariant. It composes with, rather than replaces,
+existing mechanisms: it reads from and emits into `CODEOWNERS`, `AGENTS.md`, and
+CI, and can consume an architecture map (e.g. CodeBoarding) to seed components.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
