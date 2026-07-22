@@ -979,3 +979,76 @@ def test_reports_every_touched_component(tmp_path):
     by = {v.path: v for v in verdicts}
     assert by["src/n.py"].status == "violation"
     assert by["src/e.py"].status == "pass"
+
+
+# ===========================================================================
+# Self-protection: redline's own governance files (arch.policy.json, the
+# *.meta.json annotations, redline.rules.json) require the override — an agent
+# must not be able to edit the policy to unblock itself. Hardcoded, not
+# config-configurable.
+# ===========================================================================
+
+
+def _selfprotect_policy(tmp_path: Path):
+    # a repo with a never component + a rules file, policy loaded so it records
+    # its own governance file paths.
+    write_annotation(tmp_path, "src", [{"component": "core", "editability": "never",
+                     "edit_rule": "sacred", "description": "-", "paths": ["src/**"]}])
+    (tmp_path / "redline.rules.json").write_text(
+        json.dumps({"rules": [{"match": {"path_glob": "src/**"}, "level": "never"}],
+                    "default": "editable"}))
+    return load_base_policy(tmp_path)
+
+
+def test_selfprotect_policy_file_blocked_without_override(tmp_path):
+    policy = _selfprotect_policy(tmp_path)
+    v = ag.run_gate(["arch.policy.json"], policy, ctx())
+    assert len(v) == 1 and v[0].status == "violation"
+    assert v[0].source == "self-protect"
+    assert v[0].slug == "redline-self"
+
+
+def test_selfprotect_meta_file_blocked(tmp_path):
+    policy = _selfprotect_policy(tmp_path)
+    v = ag.run_gate(["src/redline.meta.json"], policy, ctx())
+    assert v[0].status == "violation" and v[0].source == "self-protect"
+
+
+def test_selfprotect_rules_file_blocked(tmp_path):
+    policy = _selfprotect_policy(tmp_path)
+    v = ag.run_gate(["redline.rules.json"], policy, ctx())
+    assert v[0].status == "violation" and v[0].source == "self-protect"
+
+
+def test_selfprotect_policy_allowed_with_justification(tmp_path):
+    # a human can still legitimately change the policy WITH an override.
+    policy = _selfprotect_policy(tmp_path)
+    body = "## Arch-Override\nreason: relabeling after review\n"
+    v = ag.run_gate(["arch.policy.json"], policy, ctx(pr_body=body))
+    assert v[0].status == "allowed_with_override"
+
+
+def test_selfprotect_ordinary_file_not_overreached(tmp_path):
+    policy = _selfprotect_policy(tmp_path)
+    v = ag.run_gate(["README.md"], policy, ctx())
+    assert v[0].source != "self-protect"
+    assert v[0].status == "pass"
+
+
+def test_selfprotect_works_even_if_config_overrides_stripped(tmp_path):
+    # Strip the `overrides` block from the config; self-protection must STILL
+    # block (built-in signal defs), so an agent can't disable it by gutting config.
+    cfg = json.loads(json.dumps(BASE_POLICY_CFG))
+    cfg["overrides"] = {}
+    for lvl in cfg["levels"].values():
+        lvl.pop("override", None)
+    write_annotation(tmp_path, "src", [{"component": "core", "editability": "never",
+                     "edit_rule": "s", "description": "-", "paths": ["src/**"]}])
+    policy_path = write_policy(tmp_path, cfg)
+    policy = ag.load_policy(tmp_path, policy_path)
+    v = ag.run_gate(["arch.policy.json"], policy, ctx())
+    assert v[0].status == "violation" and v[0].source == "self-protect"
+    # ...and a justification still lets a human through (built-in def).
+    v2 = ag.run_gate(["arch.policy.json"], policy,
+                     ctx(pr_body="## Arch-Override\nreason: r\n"))
+    assert v2[0].status == "allowed_with_override"

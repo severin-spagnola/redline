@@ -63,6 +63,11 @@ class Component:
 class Policy:
     config: Dict[str, Any]
     components: List[Component]
+    # redline's OWN governance files (set by load_policy) — self-protected so an
+    # agent can't edit the policy/annotations/rules to unblock itself.
+    policy_rel: str = ""            # arch.policy.json, repo-relative
+    meta_rels: List[str] = field(default_factory=list)   # the *.meta.json files
+    rules_rel: str = ""            # redline.rules.json if present, repo-relative
 
     def levels_cfg(self) -> Dict[str, Any]:
         return self.config.get("levels", {})
@@ -123,7 +128,21 @@ def load_policy(repo_root: Path, policy_path: Path) -> Policy:
     annotation_glob = cfg.get("annotation_glob", "**/redline.meta.json")
     comps = _load_components(repo_root, annotation_glob)
     _validate(cfg, comps, policy_path)
-    return Policy(config=cfg, components=comps)
+
+    # Record redline's own governance files (repo-relative) for self-protection.
+    def _rel(p: Path) -> str:
+        try:
+            return str(p.resolve().relative_to(repo_root.resolve())).replace(os.sep, "/")
+        except ValueError:
+            return ""  # outside the repo; not diff-protectable here
+    meta_rels = [str(m.relative_to(repo_root)).replace(os.sep, "/")
+                 for m in sorted(repo_root.glob(annotation_glob))]
+    rules_name = cfg.get("rules_file", "redline.rules.json")
+    rules_path = repo_root / rules_name
+    return Policy(config=cfg, components=comps,
+                  policy_rel=_rel(policy_path),
+                  meta_rels=meta_rels,
+                  rules_rel=(rules_name if rules_path.is_file() else ""))
 
 
 def _validate(cfg: Dict[str, Any], comps: List[Component], policy_path: Path) -> None:
@@ -478,6 +497,35 @@ def _nudge_verdicts(changed: List[str], policy: Policy) -> List[Verdict]:
     return out
 
 
+def _is_governance_file(path: str, policy: Policy) -> Optional[str]:
+    """If `path` is one of redline's OWN governance files, return a label; else None.
+
+    Editing these is how an agent would unblock itself (relax the policy, relabel a
+    component, delete a rule). So they are self-protected: treated as needing the
+    override, hardcoded — NOT configurable, because the config is itself protected.
+    """
+    p = path.replace(os.sep, "/")
+    if policy.policy_rel and p == policy.policy_rel:
+        return "the gate config (arch.policy.json)"
+    if p in policy.meta_rels:
+        return "an editability annotation (redline.meta.json)"
+    if policy.rules_rel and p == policy.rules_rel:
+        return "the auto-labeling rule library (redline.rules.json)"
+    # also protect a redline hook/gate that lives in the repo, if declared
+    return None
+
+
+# Editing redline's own governance always requires an override, regardless of
+# config. Built-in signal definitions so this works even if the config's
+# `overrides` block is minimal or was deleted (an agent can't disable
+# self-protection by stripping the config — the config is itself protected).
+_SELF_PROTECT_SIGNALS = ["justification", "code_owner"]
+_SELF_PROTECT_DEFS = {
+    "justification": {"type": "pr_body_block", "heading": "Arch-Override"},
+    "code_owner": {"type": "codeowners_review"},
+}
+
+
 def run_gate(changed: List[str], policy: Policy, ctx: PRContext,
              base: Optional[str] = None, head: Optional[str] = None,
              repo_root: Optional[Path] = None) -> List[Verdict]:
@@ -485,6 +533,22 @@ def run_gate(changed: List[str], policy: Policy, ctx: PRContext,
     levels_cfg = policy.levels_cfg()
     overrides_cfg = policy.overrides_cfg()
     for p in changed:
+        # --- self-protection: redline's own governance files (runs FIRST, hardcoded) ---
+        gov = _is_governance_file(p, policy)
+        if gov is not None:
+            # use built-in signal defs (config can't weaken self-protection).
+            self_ov = {**_SELF_PROTECT_DEFS, **{k: v for k, v in overrides_cfg.items()
+                                                if k in _SELF_PROTECT_SIGNALS}}
+            ok, got = overrides_satisfied(_SELF_PROTECT_SIGNALS, "any", self_ov, ctx)
+            verdicts.append(Verdict(
+                p, "redline-self", "never",
+                "allowed_with_override" if ok else "violation",
+                _SELF_PROTECT_SIGNALS, got,
+                reason=f"changing {gov} weakens the guard itself — this is a governed "
+                       f"action requiring the override, so an agent cannot edit the "
+                       f"policy to unblock itself",
+                source="self-protect"))
+            continue
         comp = resolve_component(p, policy.components)
         level = comp.editability if comp else UNANNOTATED
         slug = comp.slug if comp else "(unannotated)"

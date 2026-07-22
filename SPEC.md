@@ -322,6 +322,29 @@ agents can sometimes edit their own hooks.
 
 ---
 
+## 7a. Self-protection (the gate guards its own governance)
+
+The gate's own governance files are the skeleton key: an agent blocked from
+editing a `never` component could otherwise just edit `arch.policy.json` to
+relax the rule, edit a `redline.meta.json` to relabel the component, or delete a
+rule from `redline.rules.json` — and walk through. So the gate **self-protects**:
+
+- Any change to the **policy config** (`arch.policy.json`), any **annotation
+  file** (matched by `annotation_glob`), or the **rule library**
+  (`redline.rules.json`) is treated as a governed action that **requires the
+  override** — the same bar as editing a `never` component.
+- This is **hardcoded and runs first**, before component resolution. It is **not
+  configurable** — you cannot disable self-protection by editing the config,
+  because editing the config is itself protected. It works even if the config's
+  `overrides` block is stripped (built-in `justification` / `code_owner`
+  definitions apply).
+- A **human can still legitimately change** the governance — with a justification
+  block or a code-owner approval. Self-protection blocks *unauthorized* edits (a
+  bare agent edit under a vague prompt), not *all* edits. That's how ratification
+  still works.
+
+A conforming gate MUST self-protect its policy, annotation, and rule files.
+
 ## 8. Conformance
 
 A **conforming policy** = annotation files + `arch.policy.json` that pass §6.
